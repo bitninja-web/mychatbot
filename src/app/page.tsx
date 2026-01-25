@@ -1,103 +1,313 @@
-import Image from "next/image";
+"use client";
+import React, { useEffect, useRef, useState } from "react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { CardContent } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { motion } from "framer-motion";
+import { Upload, Trash2, Sun, Moon, Plus, Menu } from "lucide-react";
 
-export default function Home() {
+interface Message {
+  id: number;
+  sender: "user" | "ai";
+  content: string;
+  timestamp: string;
+}
+
+export default function Chatbot() {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState<string>("");
+  const [isTyping, setIsTyping] = useState<boolean>(false);
+  const [uploadedFileName, setUploadedFileName] = useState<string>("");
+  const [pdfText, setPdfText] = useState<string>("");
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
+  const [showSidebar, setShowSidebar] = useState<boolean>(true);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const dropRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js";
+    script.onload = () => {
+      // @ts-ignore
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+    };
+    document.body.appendChild(script);
+  }, []);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isTyping]);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const getTimestamp = () =>
+    new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  const handleSend = async () => {
+    const trimmedInput = input.trim();
+    if (!trimmedInput) return;
+
+    if (["clear", "clear chat", "delete"].includes(trimmedInput.toLowerCase())) {
+      setMessages([]);
+      setUploadedFileName("");
+      setPdfText("");
+      setInput("");
+      return;
+    }
+
+    const userMessage: Message = {
+      id: Date.now(),
+      sender: "user",
+      content: trimmedInput,
+      timestamp: getTimestamp(),
+    };
+
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
+    setInput("");
+    setIsTyping(true);
+
+    const timeKeywords = ["time", "what time", "current time", "what's the time"];
+    const isTimeQuery = timeKeywords.some((kw) =>
+      trimmedInput.toLowerCase().includes(kw)
+    );
+
+    if (isTimeQuery) {
+      const timeResponse: Message = {
+        id: Date.now() + 1,
+        sender: "ai",
+        content: `The current time is ${new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}.`,
+        timestamp: getTimestamp(),
+      };
+      setMessages((prev) => [...prev, timeResponse]);
+      setIsTyping(false);
+      return;
+    }
+
+    const fullMessage = trimmedInput + (pdfText ? `\n\n${pdfText}` : "");
+
+    const apiFormattedMessages = [
+      ...updatedMessages.map((msg) => ({
+        role: msg.sender === "user" ? "user" : "model",
+        parts: [{ text: msg.content }],
+      })),
+      {
+        role: "user",
+        parts: [{ text: fullMessage }],
+      },
+    ];
+
+    try {
+      const response = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AIzaSyANML0UbWBb03sm1FrV1JBpOpGXhm5vS4M",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ contents: apiFormattedMessages }),
+        }
+      );
+
+      const data = await response.json();
+      let aiText =
+        data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+        "Sorry, I couldn't understand that.";
+
+      aiText = aiText.replace(/\*/g, "");
+
+      const aiMessage: Message = {
+        id: Date.now() + 1,
+        sender: "ai",
+        content: aiText,
+        timestamp: getTimestamp(),
+      };
+
+      setMessages((prev) => [...prev, aiMessage]);
+    } catch (error) {
+      console.error("API Error:", error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now() + 1,
+          sender: "ai",
+          content: "There was an error fetching the response.",
+          timestamp: getTimestamp(),
+        },
+      ]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const handlePDFUpload = async (file: File) => {
+    if (!file || !file.type.includes("pdf")) return;
+
+    setUploadedFileName(file.name);
+    const fileReader = new FileReader();
+    fileReader.onload = async () => {
+      const typedArray = new Uint8Array(fileReader.result as ArrayBuffer);
+
+      // @ts-ignore
+      const pdf = await pdfjsLib.getDocument(typedArray).promise;
+      let fullText = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const strings = content.items.map((item: any) => item.str);
+        fullText += strings.join(" ") + "\n";
+      }
+
+      setPdfText(fullText);
+    };
+    fileReader.readAsArrayBuffer(file);
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handlePDFUpload(file);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file) handlePDFUpload(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+  };
+
+  const handleNewChat = () => {
+    setMessages([]);
+    setUploadedFileName("");
+    setPdfText("");
+  };
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <div className={`flex h-screen w-full ${isDarkMode ? "bg-gray-900 text-white" : "bg-blue-300 text-black"} transition-colors duration-300`}>
+      {showSidebar && (
+        <div className={`w-60 border-r px-4 py-4 flex flex-col gap-4 ${isDarkMode ? "border-gray-700 bg-gray-800" : "bg-white border-gray-300"}`}>
+          <span className="flex">
+          <div className="mb-4 w-fit">
+            <h1 className="text-3xl font-bold">chitchat</h1>
+            <p className="text-xs italic text-gray-400 dark:text-gray-300">An AI Powered Chatbot</p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            className="text-gray-700 justify-center dark:text-white hover:text-yellow-500 ml-auto cursor-pointer"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+          </Button>
+          </span>
+          <Button variant="default" onClick={handleNewChat} className="flex items-center gap-2 text-sm cursor-pointer">
+            <Plus size={16} /> New Chat
+          </Button>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+      )}
+
+      <div className="flex flex-col flex-1 px-4 py-4 overflow-hidden">
+        <Button variant="default" size="sm" onClick={() => setShowSidebar(!showSidebar)} className="mb-2 w-fit rounded-md cursor-pointer">
+          <Menu size={18} />
+        </Button>
+
+        <div
+          ref={dropRef}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          className={`flex flex-col h-full border rounded-xl shadow ${isDarkMode ? "bg-gray-800 border-gray-700" : "bg-background border-black"} p-2 m-1 transition-colors duration-300 overflow-hidden`}
         >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+          <div className="flex justify-between items-center border-b pb-3 border-gray-400 dark:border-gray-600">
+            <div className="text-lg font-semibold w-full text-left pl-2">Chat</div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleNewChat}
+              className="text-gray-500 hover:text-red-500 dark:text-white cursor-pointer"
+            >
+              <Trash2 size={16} />
+            </Button>
+          </div>
+
+          <CardContent className="flex-1 overflow-y-auto px-2 max-h-full">
+            <ScrollArea className="space-y-3 pr-2">
+              {messages.map((msg) => (
+                <div key={msg.id} className={`flex p-2 shadow ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className={`p-3 rounded-2xl max-w-[75%] text-sm shadow-md whitespace-pre-wrap break-words overflow-x-auto relative ${
+                      msg.sender === "user"
+                        ? "bg-blue-300 text-black"
+                        : isDarkMode
+                        ? "bg-gray-700 text-white"
+                        : "bg-accent text-accent-foreground"
+                    }`}
+                  >
+                    {msg.content}
+                    <div className="text-[10px] text-right mt-1 text-gray-500">{msg.timestamp}</div>
+                  </motion.div>
+                </div>
+              ))}
+              {isTyping && (
+                <div className="flex justify-start">
+                  <motion.div
+                    initial={{ opacity: 0.5 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ repeat: Infinity, duration: 1, repeatType: "reverse" }}
+                    className="p-3 rounded-2xl bg-accent text-accent-foreground text-sm shadow-md"
+                  >
+                    Typing...
+                  </motion.div>
+                </div>
+              )}
+              <div ref={bottomRef} />
+            </ScrollArea>
+          </CardContent>
+
+          {uploadedFileName && (
+            <div className="px-4 py-1 text-xs text-gray-600 dark:text-gray-300">
+              Uploaded: {uploadedFileName}
+            </div>
+          )}
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSend();
+            }}
+            className="mt-2 flex flex-col sm:flex-row items-center gap-2 border-t pt-2 justify-between w-full border-gray-300 dark:border-gray-600"
+          >
+            <label className="flex items-center gap-2 cursor-pointer bg-gray-100 border rounded px-2 py-1 text-sm text-black hover:bg-gray-200 dark:text-white dark:bg-black dark:border-white dark:hover:bg-gray-600">
+              <Upload size={16} />
+              <span>Upload PDF</span>
+              <input type="file" accept="application/pdf" onChange={handleFileInputChange} className="hidden" />
+            </label>
+
+            <Input
+              ref={inputRef}
+              placeholder="Bolo kya hua 🦋..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              className="flex-1"
+            />
+            <Button type="submit" disabled={isTyping} className="dark:border-white dark:text-white cursor-pointer">
+              {isTyping ? "..." : "Send"}
+            </Button>
+          </form>
+        </div>
+      </div>
     </div>
   );
 }
