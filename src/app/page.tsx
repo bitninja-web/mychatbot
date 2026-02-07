@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { Upload, Trash2, Sun, Moon, Plus, Menu, X } from "lucide-react";
 
 interface Message {
@@ -52,12 +52,13 @@ export default function Chatbot() {
     inputRef.current?.focus();
   }, []);
 
+
   const handleSend = async () => {
     const trimmedInput = input.trim();
     if (!trimmedInput) return;
 
+    // Initial State Checks (API Key & Clear commands)
     if (!API_KEY) {
-      console.error("API Key is missing! Check your .env.local file.");
       setMessages((prev) => [
         ...prev,
         {
@@ -80,16 +81,6 @@ export default function Chatbot() {
       return;
     }
 
-    const timeKeywords = [
-      "current time",
-      "what's the time",
-      "what time is it",
-      "tell me the time",
-      "time please",
-    ];
-
-    const userInput = trimmedInput.toLowerCase().trim();
-
     const userMessage: Message = {
       id: Date.now(),
       sender: "user",
@@ -101,27 +92,68 @@ export default function Chatbot() {
     setInput("");
     setIsTyping(true);
 
-    const isExactTime = userInput === "time";
+    const lowerInput = trimmedInput.toLowerCase().trim();
 
-    const isTimeQuery =
-      isExactTime || timeKeywords.some((kw) => userInput.includes(kw));
+    // Custom Creator Check
+    const creatorKeywords = [
+      "who made you",
+      "who created you",
+      "who is your creator",
+      "who developed you",
+      "who built you",
+      "kon banaya tumhe",
+      "tumhe kisne banaya",
+      "tumhe kisne develop kiya",
+      "tumhe kisne create kiya",
+      "who made u",
+      "kisne bnaya tujhe",
+    ];
 
-    if (isTimeQuery) {
-      const timeResponse: Message = {
-        id: Date.now() + 1,
-        sender: "ai",
-        content: `The current time is ${new Date().toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        })}.`,
-        timestamp: getTimestamp(),
-      };
+    const isCreatorQuery = creatorKeywords.some((kw) =>
+      lowerInput.includes(kw),
+    );
 
-      setMessages((prev) => [...prev, timeResponse]);
-      setIsTyping(false);
+    if (isCreatorQuery) {
+      setTimeout(() => {
+        const creatorResponse: Message = {
+          id: Date.now() + 1,
+          sender: "ai",
+          content: "I was created by Arpit, a passionate developer! 😎",
+          timestamp: getTimestamp(),
+        };
+        setMessages((prev) => [...prev, creatorResponse]);
+        setIsTyping(false);
+      }, 600);
       return;
     }
 
+    // Time Query Check
+    const timeKeywords = [
+      "current time",
+      "what's the time",
+      "what time is it",
+      "tell me the time",
+      "time please",
+    ];
+    const isTimeQuery =
+      lowerInput === "time" ||
+      timeKeywords.some((kw) => lowerInput.includes(kw));
+
+    if (isTimeQuery) {
+      setTimeout(() => {
+        const timeResponse: Message = {
+          id: Date.now() + 1,
+          sender: "ai",
+          content: `The current time is ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`,
+          timestamp: getTimestamp(),
+        };
+        setMessages((prev) => [...prev, timeResponse]);
+        setIsTyping(false);
+      }, 600);
+      return;
+    }
+
+    // API Call for other queries
     const fullPrompt =
       trimmedInput + (pdfText ? `\n\nPDF Content:\n${pdfText}` : "");
 
@@ -141,29 +173,26 @@ export default function Chatbot() {
                 role: m.sender === "user" ? "user" : "assistant",
                 content: m.content,
               })),
-              {
-                role: "user",
-                content: fullPrompt,
-              },
+              { role: "user", content: fullPrompt },
             ],
           }),
         },
       );
 
       const data = await response.json();
-
       const aiText =
         data?.choices?.[0]?.message?.content ||
         "Sorry, I couldn't understand that.";
 
-      const aiMessage: Message = {
-        id: Date.now() + 1,
-        sender: "ai",
-        content: aiText.replace(/\*/g, ""),
-        timestamp: getTimestamp(),
-      };
-
-      setMessages((prev) => [...prev, aiMessage]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now() + 1,
+          sender: "ai",
+          content: aiText.replace(/\*/g, ""),
+          timestamp: getTimestamp(),
+        },
+      ]);
 
       setUploadedFileName("");
       setPdfText("");
@@ -256,48 +285,65 @@ export default function Chatbot() {
     <div
       className={`flex h-screen w-full ${isDarkMode ? "bg-gray-700 text-white" : "bg-cyan-200 text-black"} transition-colors duration-300`}
     >
-      {showSidebar && (
-        <div
-          className={`w-60 border-r px-4 py-4 flex flex-col gap-4 ${isDarkMode ? "border-gray-700 bg-gray-800" : "bg-blue-200 border-gray-500"}`}
-        >
-          <span className="flex">
-            <div className="mb-4 w-fit">
-              <h1 className="text-3xl font-bold">chitchat</h1>
-              <p
-                className={`text-xs italic ${isDarkMode ? "text-gray-300 border-gray-700 bg-gray-800" : "text-gray-800 bg-blue-200 border-gray-500"}`}
-              >
-                An AI Powered Chatbot
-              </p>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setIsDarkMode(!isDarkMode)}
-              className="text-gray-600 justify-center hover:text-yellow-500 ml-auto cursor-pointer"
-            >
-              {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
-            </Button>
-          </span>
-          <Button
-            variant="default"
-            onClick={handleNewChat}
-            className="flex items-center gap-2 text-sm cursor-pointer"
-          >
-            <Plus size={16} /> New Chat
-          </Button>
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {showSidebar && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowSidebar(false)}
+              className="fixed inset-0 bg-black/40 z-40 md:hidden"
+            />
 
+            <motion.div
+              initial={{ x: -260, width: 0 }}
+              animate={{ x: 0, width: 240 }}
+              exit={{ x: -260, width: 0 }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className={`fixed md:relative z-50 h-full border-r flex flex-col shadow-2xl shrink-0 overflow-hidden ${
+                isDarkMode
+                  ? "border-gray-700 bg-gray-800"
+                  : "bg-blue-200 border-gray-500"
+              }`}
+            >
+              <div className="w-60 p-4 flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <div className="min-w-fit">
+                    <h1 className="text-3xl font-bold">chitchat</h1>
+                    <p className="text-xs italic opacity-70">
+                      An AI Powered Chatbot
+                    </p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setIsDarkMode(!isDarkMode)}
+                  >
+                    {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+                  </Button>
+                </div>
+                <Button
+                  variant="default"
+                  onClick={handleNewChat}
+                  className="flex items-center gap-2 text-sm w-full"
+                >
+                  <Plus size={16} /> New Chat
+                </Button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
       <div className="flex flex-col flex-1 px-4 py-4 overflow-hidden">
         <Button
           variant="default"
           size="sm"
           onClick={() => setShowSidebar(!showSidebar)}
-          className="mb-2 w-fit rounded-md cursor-pointer"
+          className="mb-2 w-fit rounded-md cursor-pointer z-40"
         >
           <Menu size={18} />
         </Button>
-
         <div
           ref={dropRef}
           onDrop={handleDrop}
@@ -329,7 +375,7 @@ export default function Chatbot() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3 }}
-                    className={`p-3 rounded-2xl max-w-[75%] text-sm shadow-md whitespace-pre-wrap break-words overflow-x-auto relative ${
+                    className={`p-3 rounded-2xl max-w-[85%] md:max-w-[75%] text-sm shadow-md whitespace-pre-wrap break-words overflow-x-auto relative ${
                       msg.sender === "user"
                         ? "bg-blue-300 text-black"
                         : isDarkMode
@@ -364,7 +410,6 @@ export default function Chatbot() {
             </ScrollArea>
           </CardContent>
 
-          {/* --- CHANGED PART START: Added Clear Button --- */}
           {uploadedFileName && (
             <div className="px-4 py-1 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
               <span className="truncate max-w-[200px]">
@@ -382,7 +427,6 @@ export default function Chatbot() {
               </button>
             </div>
           )}
-          {/* --- CHANGED PART END --- */}
 
           <form
             onSubmit={(e) => {
@@ -408,7 +452,7 @@ export default function Chatbot() {
               placeholder="Bolo kya hua 🦋..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              className="flex-1"
+              className="flex-1 flex-wrap min-w-0" // min-w-0 prevents input from overflowing flex container
             />
             <Button
               type="submit"
